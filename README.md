@@ -20,12 +20,10 @@
 
 ## 画像
 
-本マップの画像は以下のサイトで提供されている素材を利用しています。
+本マップの画像は下記サイトの素材を利用しています。
+Eldorado + Stroke 3132 icons mini free
+http://www.icojam.com/blog/?p=668
 
-「かわいいフリー素材集いらすとや」
-
-- http://www.irasutoya.com/2012/02/blog-post_9500.html
-- http://www.irasutoya.com/2012/03/blog-post_1494.html
 
 ## 利用している地図について
 
@@ -38,3 +36,12 @@
 この地図はyuskesuzkiさん作成の函館ラッピ地図のシステムを利用しています。
 http://yuskesuzki.github.io/luppymap/
 
+## 更新履歴
+20150801 QGIS Hackfest 2015 Hokkaidoにて作成されました。
+
+## Thanks to 
+dayjournal_nori
+aricone
+
+## 責任者
+MayumiPod
