@@ -1,0 +1,423 @@
+<!DOCTYPE html>
+<html lang="ja">
+    <head>
+        <meta http-equiv="content-type" content="text/html; charset=utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+        <title>函館ラッピ地図</title>
+        <link href="//maxcdn.bootstrapcdn.com/font-awesome/4.2.0/css/font-awesome.min.css" rel="stylesheet">
+        <link rel="stylesheet" href="css/leaflet.css" />
+        <link rel="stylesheet" href="js/L.Control.Locate.min.css" />
+        <link rel="stylesheet" href="js/L.Control.Locate.ie.min.css" />
+        <link rel="stylesheet" href="js/leaflet.label.css" />
+        <link rel="stylesheet" href="js/leaflet.moveToList.css" />
+        <link rel="stylesheet" href="js/leaflet-routing-machine.css" />
+
+        <script src="js/leaflet.js"></script>
+        <script src="js/leaflet.ajax.min.js"></script>
+        <script src="js/leaflet-hash.js"></script>
+        <script src="js/leaflet.label.js"></script>
+        <script src="js/L.Control.Locate.min.js"></script>
+        <script src="js/leaflet.moveToList.js"></script>
+        <script src="js/leaflet-routing-machine.min.js"></script>
+        <script src="js/jquery-2.1.1.min.js"></script>
+        <style type="text/css">
+        body {
+            padding: 0;
+            margin: 0;
+        }
+        html, body, #map {
+            height: 100%;
+        }
+        td.header {
+            vertical-align: top;
+        }
+        </style>
+    </head>
+    <body>
+        <div id="map"></div>
+
+        <script>
+            var stores = [];
+            var moveToList = {};
+
+            var storesProperty = {};
+            var storeJson = null;
+
+            var storeGroup1 = L.layerGroup(); // ラッキーピエロ用
+            var storeGroup2 = L.layerGroup(); // ハセガワストア用
+
+            var map = null;
+
+            // L.Routing.Localizationに日本語リソースを追加
+            L.Routing.Localization['ja'] = {
+                directions: {
+                    N: '北',
+                    NE: '北東',
+                    E: '東',
+                    SE: '南東',
+                    S: '南',
+                    SW: '南西',
+                    W: '西',
+                    NW: '北西'
+                },
+                instructions: {
+                    // instruction, postfix if the road is named
+                    'Head':
+                        ['{road} {dir}方向', ''],
+                    'Continue':
+                        ['{road} {dir}方向道なり', ''],
+                    'SlightRight':
+                        ['{road} 右方向', ''],
+                    'Right':
+                        ['{road} 右折',''],
+                    'SharpRight':
+                        ['{road} 右急カーブ', ''],
+                    'TurnAround':
+                        ['Uターン', ''],
+                    'SharpLeft':
+                        ['{road} 左急カーブ', ''],
+                    'Left':
+                        ['{road} 左折', ''],
+                    'SlightLeft':
+                        ['{road} 左方向', ''],
+                    'WaypointReached':
+                        ['分岐点到着'],
+                    'Roundabout':
+                        ['Take the {exitStr} exit in the roundabout', ' onto {road}'],
+                    'DestinationReached':
+                        ['目的地到着'],
+                },
+                formatOrder: function(n) {
+                    return n;
+                }
+            };
+
+            // 初期処理
+            $(document).ready(function() {
+                // 店舗別プロパティを読み込み
+                $.getJSON('data/stores.property.json', function(data) {
+                    for(store in data) {
+                        storesProperty[store] = data[store];
+                    }
+                });
+
+
+                // 店舗geoJsonを読み込み
+                storeJson = null;
+                $.getJSON('data/lucky.geojson', function(data) {
+                    storeJson = data;
+                }).done(function(){
+                    storeGroup1 = L.geoJson(storeJson, {
+                        onEachFeature: onEachFeatureFunc,
+                        pointToLayer: pointToLayerFunc,
+                        filter: storeGroup1Filter
+                    });
+
+                    storeGroup2 = L.geoJson(storeJson, {
+                        onEachFeature: onEachFeatureFunc,
+                        pointToLayer: pointToLayerFunc,
+                        filter: storeGroup2Filter
+                    });
+
+                    // 地図タイルレイヤ
+                    osm = L.tileLayer(
+                        'http://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                            maxZoom: 18,
+                            attribution: 'Map data &copy; <a href="http://openstreetmap.org">OpenStreetMap</a> contributors, ' +
+                            '<a href="http://creativecommons.org/licenses/by-sa/2.0/">CC-BY-SA</a>',
+                            id: 'examples.map-i875mjb7'
+                        });
+
+                    // L.map準備
+                    latlng = L.latLng(41.76840, 140.72924); // 地図初期位置
+                    map = L.map('map', {
+                        center: latlng,
+                        zoom: 16,
+                        layers: [osm, storeGroup1, storeGroup2]
+                    });
+
+                    // 店舗移動用セレクトボックス表示とセレクトボックス要素の設定
+                    L.control.moveToList().addTo(map);
+                    addMoveToList(storeJson);
+
+                    // レイヤーコントロールを表示
+                    baseMaps = {
+                        "OSM": osm
+                    };
+                    overlayMaps = {
+                        'ラッキーピエロ': storeGroup1,
+                        'ハセガワストア': storeGroup2,
+                    }
+                    L.control.layers(baseMaps, overlayMaps).addTo(map);
+
+                    // マップクリック時のイベント
+                    map.on('click', onMapClick);
+
+                    // スケールを追加
+                    L.control.scale().addTo(map);
+
+                    // URLハッシュを有効に
+                    hash = new L.Hash(map);
+
+                    // ロケーションコントロール
+                    L.control.locate().addTo(map);
+                });
+
+            });
+
+            // GeoJson読み込み時に行う処理
+            function onEachFeatureFunc(feature,layer) {
+                setPopup(feature,layer);
+                setStores(feature,layer);
+            }
+
+            // 店舗情報管理用変数に値をセット
+            function setStores(feature,layer) {
+                if (feature.properties){
+                    var storeName = feature.properties['店舗名'] + ' ' + feature.properties['支店名'];
+                    obj = {};
+                    obj['store'] = feature.properties['店舗名'];
+                    obj['name']  = storeName;
+                    obj['lon']  = feature.properties['lon'];
+                    obj['lat']  = feature.properties['lat'];
+                    obj['layer'] = layer;
+                    stores.push(obj);
+                    moveToList[storeName] = obj;
+                }
+            }
+
+            // 地点クリック時のポップアップ
+            function setPopup(feature,layer) {
+                if (feature.properties){
+                    // 営業時間
+                    var businessHour = '';
+                    if(feature.properties['営業時間開始'] == '0:00' && feature.properties['営業時間終了'] == '0:00') {
+                        businessHour = '24時間';
+                    } else {
+                        businessHour = feature.properties['営業時間開始'] + '〜' + feature.properties['営業時間終了'];
+                    }
+
+                    // 店舗名称
+                    var storeName = feature.properties['店舗名'] + ' ' + feature.properties['支店名'];
+
+                    contents  = '<h2>' +storeName+ '</h2>';
+                    contents += '<table>';
+                    contents += '    <tr>';
+                    contents += '        <td class="header">特徴</td>';
+                    contents += '        <td>'+feature.properties['特徴']+'</td>';
+                    contents += '    </tr>';
+                    contents += '    <tr>';
+                    contents += '        <td class="header">住所</td>';
+                    contents += '        <td>'+feature.properties['住所']+'</td>';
+                    contents += '    </tr>';
+                    contents += '    <tr>';
+                    contents += '        <td class="header">TEL</td>';
+                    contents += '        <td>'+feature.properties['TEL']+'</td>';
+                    contents += '    </tr>';
+                    contents += '    <tr>';
+                    contents += '        <td class="header">営業時間</td>';
+                    contents += '        <td>'
+                    contents += businessHour;
+                    if(feature.properties['駐車場台数'] > 0) {
+                        contents += "<br/>駐車場:" + feature.properties['駐車場台数'] + '台';
+                    }
+                    if(feature.properties['席数'] > 0) {
+                        contents += "<br/>席数:" + feature.properties['席数'];
+                    }
+                    contents += '        </td>';
+                    contents += '    </tr>';
+                    if(feature.properties['店長おすすめ'] != "") {
+                        contents += '    <tr>';
+                        contents += '        <td class="header">店長おすすめ</td>';
+                        contents += '        <td>'+feature.properties['店長おすすめ']+'</td>';
+                        contents += '    </tr>';
+                    }
+                    if(feature.properties['URL'] != null) {
+                        contents += '    <tr>';
+                        contents += '        <td class="header">店舗HP</td>';
+                        contents += '        <td>';
+                        contents += '        <a href="' +feature.properties['URL']+ '" target="_new">[PC]</a> ';
+                        if(feature.properties['mobileURL'] != null) {
+                            contents += '        <a href="' +feature.properties['mobileURL']+ '" target="_new">[スマホ]</a>';
+                        }
+                        contents += '        </td>';
+                        contents += '    </tr>';
+                    }
+                    contents += '</table>';
+
+                    layer.bindPopup(contents);
+                }
+            }
+
+            // 指定した店名の緯度経度に移動する
+            function moveToStore(storeName) {
+                if(nowMarker != null) {
+                    map.removeLayer(nowMarker);
+                }
+                // 描いた線を削除
+                if(nowPolyline != null) {
+                    map.removeLayer(nowPolyline);
+                }
+                clickflg = false;
+
+                if(storeName != null) {
+                    moveToObj = moveToList[storeName];
+                    if(moveToObj != null) {
+                        moveLatlng = L.latLng(moveToObj.lat, moveToObj.lon);
+                        map.panTo(moveLatlng, {animate: true});
+                        moveToObj.layer.openPopup();
+                    }
+                }
+            }
+
+            // GeoJSON読み取り時に地図上にマッピングした場所に配置するアイコン画像を変更する関数
+            function pointToLayerFunc(feature, latlng) {
+                // アイコン画像は stores.property.json から読み込んだ storesProperty より取得
+                iconUrl  = storesProperty[feature.properties['店舗名']].iconUrl;
+                iconSize = storesProperty[feature.properties['店舗名']].iconSize;
+
+                var storeIcon = L.icon({
+                    iconUrl: iconUrl,
+                    iconSize: iconSize, // size of the icon
+                });
+
+                var storeName = feature.properties['店舗名'] + '<br/>' + feature.properties['支店名'];
+                return L.marker(latlng, {icon: storeIcon}).bindLabel(storeName);
+            }
+
+            // ラッキーピエロ店舗抽出用フィルター
+            function storeGroup1Filter(feature, layer) {
+                if(feature.properties['店舗名'] == 'ラッキーピエロ') {
+                    return true;
+                } else {
+                    return false;
+                }
+            }
+
+            // ハセガワストア店舗抽出用フィルター
+            function storeGroup2Filter(feature, layer) {
+                if(feature.properties['店舗名'] == 'ハセガワストア') {
+                    return true;
+                } else {
+                    return false;
+                }
+            }
+
+            var clickflg    = false;
+            var nowMarker   = null;
+            var nowPolyline = null;
+            var popup = L.popup();
+            var routing = null;
+
+            // 地図クリック時の処理
+            function onMapClick(e) {
+                // 描いたマーカーを削除
+                if(nowMarker != null) {
+                    map.removeLayer(nowMarker);
+                }
+                // 描いた線を削除
+                if(nowPolyline != null) {
+                    map.removeLayer(nowPolyline);
+                }
+                if(routing != null) {
+                    routing.removeFrom(map);
+                    routing = null;
+                }
+                if(clickflg) {
+                    clickflg = false;
+                    return;
+                }
+
+                var latlng = e.latlng;
+                store = findNearStore(latlng);
+                storeLatLng = L.latLng(store.lat, store.lon);
+                storePoint = map.latLngToLayerPoint(storeLatLng);
+
+                var latlngs = [latlng, storeLatLng];
+                // nowPolyline = L.polyline(latlngs, {color: 'red'}).addTo(map);
+                nowMarker = L.marker(latlng).addTo(map);
+
+                anchor   = '<a href="javascript:moveToStore(\'' + store.name + '\')">';
+                anchor  += store.name + '</a>';
+
+                content  = "最寄りの店舗:" + anchor + "<br/>";
+                distance = parseInt(storeLatLng.distanceTo(latlng));
+                unit     = 'm';
+                if(distance > 1000) {
+                    distance = distance / 1000;
+                    unit = 'km';
+                }
+                // content += "直線距離:" + distance + unit + "<br/>";
+                // content += latlng.lng + ", " + latlng.lat; // マーカー部の緯度経度情報を表示
+
+                popup
+                    .setLatLng(latlng)
+                    .setContent(content)
+                    .openOn(map);
+
+                routing = L.Routing.control({
+                    waypoints: [
+                        latlng,
+                        storeLatLng,
+                    ],
+                    // geocoder: L.Control.Geocoder.nominatim(),
+                    routeWhileDragging: true,
+                    reverseWaypoints: true,
+                    language: 'ja'
+                }).addTo(map);
+
+                clickflg = true;
+            }
+
+            // クリック地点より直線距離が最も近い店舗を検索して戻す
+            function findNearStore(latlng) {
+                var retobj = null;
+                var preDistance = 0;
+
+                // レイヤー可視状態チェック
+                storeGroup1check = false;
+                storeGroup2check = false;
+
+                // 店舗1レイヤーグループに含むレイヤーがマップに表示されているかチェック
+                storeGroup1.eachLayer(function(layer){
+                    if(map.hasLayer(layer)) {
+                        storeGroup1check = true;
+                        return;
+                    }
+                });
+                // 店舗2レイヤーグループに含むレイヤーがマップに表示されているかチェック
+                storeGroup2.eachLayer(function(layer){
+                    if(map.hasLayer(layer)) {
+                        storeGroup2check = true;
+                        return;
+                    }
+                });
+
+                for(var i=0; i<stores.length; i++) {
+                    // 店舗1が非表示状態の場合ループを中断
+                    if(!storeGroup1check && stores[i].store == 'ラッキーピエロ') {
+                        continue;
+                    }
+                    // 店舗2が非表示状態の場合ループを中断
+                    if(!storeGroup2check && stores[i].store == 'ハセガワストア') {
+                        continue;
+                    }
+
+                    // 店舗座標とクリック位置の距離を測定。最も近い店舗を探す
+                    storeLatLng = L.latLng(stores[i].lat, stores[i].lon);
+                    distance = storeLatLng.distanceTo(latlng);
+                    if(retobj != null) {
+                        if(distance < preDistance) {
+                            retobj = stores[i];
+                            preDistance = distance;
+                        }
+                    } else {
+                        retobj = stores[i];
+                        preDistance = distance;
+                    }
+                }
+                return retobj;
+            }
+        </script>
+    </body>
+</html>
